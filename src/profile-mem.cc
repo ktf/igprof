@@ -78,7 +78,7 @@ add(void *ptr, size_t size)
 
   // Drop top two stack frames (me, hook).
   buf->lock();
-  frame = buf->push(addresses+2, depth-2);
+  frame = buf->push(addresses+4, depth-4);
   buf->tick(frame, &s_ct_total, size, 1);
   buf->tick(frame, &s_ct_largest, size, 1);
   ctr = buf->tick(frame, &s_ct_live, size, 1);
