@@ -1799,7 +1799,7 @@ public:
       return result;
     }
 
-  std::string filename(void)
+  const std::string &filename(void)
     {
       assert(SYMBOL);
       assert(SYMBOL->FILE);
