@@ -28,16 +28,19 @@ ENDIF()
 
 FIND_PACKAGE(Threads)
 
-#Find PCRE library
+# Find the PCRE2 library (libpcre2-8), used by igprof-analyse for the
+# regular-expression collapse/merge filters (--merge-regexp / --merge-ancestors).
+# The original PCRE (v1) has been end-of-life since 2021 and current
+# distributions (Debian, Fedora, NixOS, ...) ship PCRE2, so we target PCRE2 only.
 IF(PCRE_INCLUDE_DIR AND PCRE_LIBRARIES)
   SET(PCRE_FOUND TRUE)
 ELSE(PCRE_INCLUDE_DIR AND PCRE_LIBRARIES)
 
-  FIND_PATH(PCRE_INCLUDE_DIR NAMES pcre.h
-            PATHS /usr/include /usr/local/include)
+  FIND_PATH(PCRE_INCLUDE_DIR NAMES pcre2.h
+            PATHS /usr/include /usr/local/include /opt/homebrew/include)
 
-  FIND_LIBRARY(PCRE_LIBRARY NAMES pcre
-               PATHS /usr/lib /usr/local/lib)
+  FIND_LIBRARY(PCRE_LIBRARY NAMES pcre2-8
+               PATHS /usr/lib /usr/local/lib /opt/homebrew/lib)
 
 
   IF(PCRE_INCLUDE_DIR AND PCRE_LIBRARY)
@@ -48,6 +51,14 @@ ELSE(PCRE_INCLUDE_DIR AND PCRE_LIBRARIES)
   ENDIF(PCRE_INCLUDE_DIR AND PCRE_LIBRARY)
 
 ENDIF(PCRE_INCLUDE_DIR AND PCRE_LIBRARIES)
+
+IF(PCRE_FOUND)
+  MESSAGE(STATUS "Found PCRE2: ${PCRE_LIBRARIES}")
+ELSE()
+  MESSAGE(WARNING "PCRE2 (libpcre2-8) not found; igprof-analyse regexp filters "
+                  "(--merge-regexp / --merge-ancestors) will be disabled. "
+                  "Install libpcre2-dev / pcre2-devel to enable them.")
+ENDIF()
 
 # ARM Check if arm CCNT instruction is allowed
 IF(${CMAKE_SYSTEM_PROCESSOR} MATCHES arm OR ${CMAKE_SYSTEM_PROCESSOR} MATCHES aarch64)

@@ -39,7 +39,7 @@ jobs:
             ;;
             centos:*|fedora:*)
               yum update -y
-              dnf install -y gcc gcc-c++ make cmake autoconf automake libtool pkgconf-pkg-config git libunwind-devel pcre-devel
+              dnf install -y gcc gcc-c++ make cmake autoconf automake libtool pkgconf-pkg-config git libunwind-devel pcre2-devel
             ;;
             macos:*)
               brew install cmake

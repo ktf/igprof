@@ -22,7 +22,8 @@
 #include <sstream>
 #include <cassert>
 #ifdef PCRE_FOUND
-#  include <pcre.h>
+#  define PCRE2_CODE_UNIT_WIDTH 8
+#  include <pcre2.h>
 #endif
 
 #ifndef iggetc
@@ -1512,7 +1513,7 @@ class RegexpFilter : public CollapsingFilter
   struct Regexp
   {
 #ifdef PCRE_FOUND
-    pcre          *re;
+    pcre2_code    *re;
 #endif
     std::string   with;
   };
@@ -1526,16 +1527,22 @@ public:
     {
       m_regexps.resize(m_regexps.size() + 1);
       Regexp &regexp = m_regexps.back();
-      const char *errptr = 0;
 #ifdef PCRE_FOUND
-      int erroff = 0;
-      regexp.re = pcre_compile(specs[i].re.c_str(), 0, &errptr, &erroff, 0);
-#endif
-      if (errptr)
+      int errnumber = 0;
+      PCRE2_SIZE erroff = 0;
+      regexp.re = pcre2_compile((PCRE2_SPTR) specs[i].re.c_str(),
+                                PCRE2_ZERO_TERMINATED, 0,
+                                &errnumber, &erroff, 0);
+      if (! regexp.re)
       {
-        std::cerr << "Error while compiling regular expression" << std::endl;
+        PCRE2_UCHAR errbuf[256];
+        pcre2_get_error_message(errnumber, errbuf, sizeof(errbuf));
+        std::cerr << "Error while compiling regular expression '"
+                  << specs[i].re << "' at offset " << erroff << ": "
+                  << errbuf << std::endl;
         exit(1);
       }
+#endif
       regexp.with = specs[i].with;
     }
   }
@@ -1600,23 +1607,25 @@ private:
   std::vector<Regexp> m_regexps;
 #ifdef PCRE_FOUND
   //Find regexp match from a string and replace the match with string "with"
-  void replace(const pcre *re, const std::string &with, const std::string &subject,
+  void replace(const pcre2_code *re, const std::string &with, const std::string &subject,
                std::string &result)
   {
     result.clear();
     result.reserve(subject.size());
-    int ovector[30];
-    int options = 0;
-    int subjectLength = subject.length();
-    int rc = pcre_exec(re, NULL, subject.c_str(), subjectLength, 0 ,options,
-                       ovector, 30);
+    pcre2_match_data *md = pcre2_match_data_create_from_pattern(re, NULL);
+    uint32_t options = 0;
+    PCRE2_SIZE subjectLength = subject.length();
+    int rc = pcre2_match(re, (PCRE2_SPTR) subject.c_str(), subjectLength, 0,
+                         options, md, NULL);
 
     //no match or matching error, do nothing
     if (rc < 0)
     {
       result = subject;
+      pcre2_match_data_free(md);
       return;
     }
+    PCRE2_SIZE *ovector = pcre2_get_ovector_pointer(md);
     // construct replacement string
     std::string replacement;
     replacement.reserve(with.size());
@@ -1645,7 +1654,7 @@ private:
     //construct first part of the result string
     result.append(subject.substr(0, ovector[0]));
     result.append(replacement);
-    int endOfMatch = ovector[1];
+    PCRE2_SIZE endOfMatch = ovector[1];
 
     //Find posible later matches and contruct the result
     for(;;)
@@ -1657,11 +1666,11 @@ private:
           result.append(subject.substr(endOfMatch));
           break;
         }
-        options = PCRE_NOTEMPTY | PCRE_ANCHORED;
+        options = PCRE2_NOTEMPTY | PCRE2_ANCHORED;
       }
       // Find new matches.
-      rc = pcre_exec(re, NULL, subject.c_str(), subjectLength, endOfMatch,
-                     options, ovector, 30);
+      rc = pcre2_match(re, (PCRE2_SPTR) subject.c_str(), subjectLength,
+                       endOfMatch, options, md, NULL);
 
       //No new matches. Add the the tail of the subject into result.
       if (rc < 0)
@@ -1693,6 +1702,7 @@ private:
       //Mark the endOf this match
       endOfMatch = ovector[1];
     }
+    pcre2_match_data_free(md);
   }
 #endif
 };
@@ -2909,19 +2919,28 @@ void walk_ancestors(NodeInfo *first, AncestorsSpec specs)
   CollapsedSymbols m_symbols;
 
   // Compile regular expressions listed in AncestorsSpec.
-  std::vector<pcre *> ancestor_list;
+  std::vector<pcre2_code *> ancestor_list;
+  std::vector<pcre2_match_data *> match_data_list;
   std::string replace = specs.with;
   ancestor_list.resize(specs.ancestors.size());
+  match_data_list.resize(specs.ancestors.size());
   for (size_t i = 0, end = specs.ancestors.size(); i != end; i++)
   {
-    const char *errptr = 0;
-    int erroff = 0;
-    ancestor_list[i] = pcre_compile(specs.ancestors[i].c_str(), 0, &errptr, &erroff, 0);
-    if (errptr)
+    int errnumber = 0;
+    PCRE2_SIZE erroff = 0;
+    ancestor_list[i] = pcre2_compile((PCRE2_SPTR) specs.ancestors[i].c_str(),
+                                     PCRE2_ZERO_TERMINATED, 0,
+                                     &errnumber, &erroff, 0);
+    if (! ancestor_list[i])
     {
-      std::cerr << "Error while compiling regular expression" << std::endl;
+      PCRE2_UCHAR errbuf[256];
+      pcre2_get_error_message(errnumber, errbuf, sizeof(errbuf));
+      std::cerr << "Error while compiling regular expression '"
+                << specs.ancestors[i] << "' at offset " << erroff << ": "
+                << errbuf << std::endl;
       exit(1);
     }
+    match_data_list[i] = pcre2_match_data_create_from_pattern(ancestor_list[i], NULL);
   }
 
   // Add the first node (spontaneous) into call stack
@@ -2933,9 +2952,8 @@ void walk_ancestors(NodeInfo *first, AncestorsSpec specs)
   firstItem.post = 0;
   stack.reserve(10000);
 
-  // variables for pcre_exec
+  // variables for pcre2_match
   std::string symbolname;
-  int ovector[9];
   int rc = 0;
 
   // Keeps track matches
@@ -2958,8 +2976,8 @@ void walk_ancestors(NodeInfo *first, AncestorsSpec specs)
       rc = -1;
       if (limit >= control)
       {
-        rc = pcre_exec(ancestor_list[control], NULL, symbolname.c_str(),
-                       strlen(symbolname.c_str()), 0, 0, ovector, 9);
+        rc = pcre2_match(ancestor_list[control], (PCRE2_SPTR) symbolname.c_str(),
+                         PCRE2_ZERO_TERMINATED, 0, 0, match_data_list[control], NULL);
       }
       else  // We are in the branch that has match below the match
       {
@@ -3019,6 +3037,13 @@ void walk_ancestors(NodeInfo *first, AncestorsSpec specs)
     // were matching some ancestor.
     else
       --control;
+  }
+
+  // Release the compiled patterns and their match data.
+  for (size_t i = 0, end = ancestor_list.size(); i != end; i++)
+  {
+    pcre2_match_data_free(match_data_list[i]);
+    pcre2_code_free(ancestor_list[i]);
   }
 #else
 void walk_ancestors(NodeInfo * /*first*/, AncestorsSpec * /*specs*/)
